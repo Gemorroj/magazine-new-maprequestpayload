@@ -6,6 +6,8 @@ namespace App\Controller\Api;
 
 use App\Dto\CategoryDto;
 use App\Entity\Category;
+use App\Pagination\Paginator;
+use App\Repository\CategoryRepository;
 use App\Security\Voter\CategoryVoter;
 use Doctrine\DBAL\Exception\UniqueConstraintViolationException;
 use Doctrine\ORM\EntityManagerInterface;
@@ -14,6 +16,7 @@ use Nelmio\ApiDocBundle\Attribute\Security;
 use OpenApi\Attributes as OA;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\JsonResponse;
+use Symfony\Component\HttpKernel\Attribute\MapQueryParameter;
 use Symfony\Component\HttpKernel\Attribute\MapRequestPayload;
 use Symfony\Component\HttpKernel\Exception\HttpException;
 use Symfony\Component\Routing\Attribute\Route;
@@ -97,6 +100,36 @@ final class CategoryController extends AbstractController
         response: 200,
         description: 'Success',
         content: new OA\JsonContent(
+            required: ['totalItems', 'member'],
+            properties: [
+                new OA\Property(property: 'totalItems', type: 'integer', minimum: 0, readOnly: true, nullable: false),
+                new OA\Property(property: 'member', type: 'array', items: new OA\Items(ref: new Model(type: CategoryDto::class, groups: ['category:read']), nullable: false), readOnly: true, nullable: false),
+            ],
+            type: 'object',
+            nullable: false,
+        )
+    )]
+    #[Route('', methods: ['GET'], format: 'json')]
+    public function collection(#[MapQueryParameter] int $page, CategoryRepository $categoryRepository): JsonResponse
+    {
+        $queryBuilder = $categoryRepository->createQueryBuilder('category');
+        $paginator = (new Paginator($queryBuilder))->paginate($page);
+        $categoriesDto = [];
+        foreach ($paginator->getResults() as $category) {
+            $this->denyAccessUnlessGranted(CategoryVoter::VIEW, $category);
+            $categoriesDto[] = CategoryDto::fromEntity($category);
+        }
+
+        return $this->json([
+            'totalItems' => $paginator->getNumResults(),
+            'member' => $categoriesDto,
+        ], context: ['groups' => ['category:read']]);
+    }
+
+    #[OA\Response(
+        response: 200,
+        description: 'Success',
+        content: new OA\JsonContent(
             ref: new Model(type: CategoryDto::class, groups: ['category:read']),
             nullable: false,
         ),
@@ -122,10 +155,37 @@ final class CategoryController extends AbstractController
     #[Route('', methods: ['POST'], format: 'json')]
     public function post(#[MapRequestPayload(validationGroups: 'category:create')] CategoryDto $categoryDto, EntityManagerInterface $entityManager): JsonResponse
     {
-        $category = $categoryDto->toEntity(new Category());
+        $category = new Category();
+        $categoryDto->hydrate($category);
 
         $this->denyAccessUnlessGranted(CategoryVoter::EDIT, $category);
 
+        $entityManager->persist($category);
+        try {
+            $entityManager->flush();
+        } catch (UniqueConstraintViolationException $e) {
+            throw HttpException::fromStatusCode(422, 'The Category already exists.', $e);
+        }
+
+        $dto = CategoryDto::fromEntity($category);
+
+        return $this->json($dto, context: ['groups' => ['category:read']]);
+    }
+
+    #[OA\Response(
+        response: 200,
+        description: 'Success',
+        content: new OA\JsonContent(
+            ref: new Model(type: CategoryDto::class, groups: ['category:read']),
+            nullable: false,
+        ),
+    )]
+    #[Route('/{id}', requirements: ['id' => '\d+'], methods: ['PUT'], format: 'json')]
+    public function put(Category $category, #[MapRequestPayload(validationGroups: 'category:update')] CategoryDto $categoryDto, EntityManagerInterface $entityManager): JsonResponse
+    {
+        $this->denyAccessUnlessGranted(CategoryVoter::EDIT, $category);
+
+        $categoryDto->hydrate($category);
         $entityManager->persist($category);
         try {
             $entityManager->flush();

@@ -73,7 +73,7 @@ final readonly class ProductDto
         );
     }
 
-    public function toEntity(Product $product, CategoryRepository $categoryRepository): Product
+    public function hydrate(Product $product, CategoryRepository $categoryRepository): void
     {
         $category = $categoryRepository->find($this->category);
         if (!$category) {
@@ -87,7 +87,5 @@ final readonly class ProductDto
         $product->setComposition($this->composition);
         $product->setManufacturer($this->manufacturer);
         $product->setDescriptionInternal($this->descriptionInternal);
-
-        return $product;
     }
 }

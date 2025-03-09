@@ -6,7 +6,9 @@ namespace App\Controller\Api;
 
 use App\Dto\ProductDto;
 use App\Entity\Product;
+use App\Pagination\Paginator;
 use App\Repository\CategoryRepository;
+use App\Repository\ProductRepository;
 use App\Security\Voter\ProductVoter;
 use Doctrine\DBAL\Exception\UniqueConstraintViolationException;
 use Doctrine\ORM\EntityManagerInterface;
@@ -15,6 +17,7 @@ use Nelmio\ApiDocBundle\Attribute\Security;
 use OpenApi\Attributes as OA;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\JsonResponse;
+use Symfony\Component\HttpKernel\Attribute\MapQueryParameter;
 use Symfony\Component\HttpKernel\Attribute\MapRequestPayload;
 use Symfony\Component\HttpKernel\Exception\HttpException;
 use Symfony\Component\Routing\Attribute\Route;
@@ -98,6 +101,36 @@ final class ProductController extends AbstractController
         response: 200,
         description: 'Success',
         content: new OA\JsonContent(
+            required: ['totalItems', 'member'],
+            properties: [
+                new OA\Property(property: 'totalItems', type: 'integer', minimum: 0, readOnly: true, nullable: false),
+                new OA\Property(property: 'member', type: 'array', items: new OA\Items(ref: new Model(type: ProductDto::class, groups: ['product:read']), nullable: false), readOnly: true, nullable: false),
+            ],
+            type: 'object',
+            nullable: false,
+        )
+    )]
+    #[Route('', methods: ['GET'], format: 'json')]
+    public function collection(#[MapQueryParameter] int $page, ProductRepository $productRepository): JsonResponse
+    {
+        $queryBuilder = $productRepository->createQueryBuilder('product');
+        $paginator = (new Paginator($queryBuilder))->paginate($page);
+        $productsDto = [];
+        foreach ($paginator->getResults() as $product) {
+            $this->denyAccessUnlessGranted(ProductVoter::VIEW, $product);
+            $productsDto[] = ProductDto::fromEntity($product);
+        }
+
+        return $this->json([
+            'totalItems' => $paginator->getNumResults(),
+            'member' => $productsDto,
+        ], context: ['groups' => ['product:read']]);
+    }
+
+    #[OA\Response(
+        response: 200,
+        description: 'Success',
+        content: new OA\JsonContent(
             ref: new Model(type: ProductDto::class, groups: ['product:read']),
             nullable: false,
         ),
@@ -123,10 +156,37 @@ final class ProductController extends AbstractController
     #[Route('', methods: ['POST'], format: 'json')]
     public function post(#[MapRequestPayload(validationGroups: 'product:create')] ProductDto $productDto, CategoryRepository $categoryRepository, EntityManagerInterface $entityManager): JsonResponse
     {
-        $product = $productDto->toEntity(new Product(), $categoryRepository);
+        $product = new Product();
+        $productDto->hydrate($product, $categoryRepository);
 
         $this->denyAccessUnlessGranted(ProductVoter::EDIT, $product);
 
+        $entityManager->persist($product);
+        try {
+            $entityManager->flush();
+        } catch (UniqueConstraintViolationException $e) {
+            throw HttpException::fromStatusCode(422, 'The Product already exists.', $e);
+        }
+
+        $dto = ProductDto::fromEntity($product);
+
+        return $this->json($dto, context: ['groups' => ['product:read']]);
+    }
+
+    #[OA\Response(
+        response: 200,
+        description: 'Success',
+        content: new OA\JsonContent(
+            ref: new Model(type: ProductDto::class, groups: ['product:read']),
+            nullable: false,
+        ),
+    )]
+    #[Route('/{id}', requirements: ['id' => '\d+'], methods: ['PUT'], format: 'json')]
+    public function put(Product $product, #[MapRequestPayload(validationGroups: 'product:update')] ProductDto $productDto, CategoryRepository $categoryRepository, EntityManagerInterface $entityManager): JsonResponse
+    {
+        $this->denyAccessUnlessGranted(ProductVoter::EDIT, $product);
+
+        $productDto->hydrate($product, $categoryRepository);
         $entityManager->persist($product);
         try {
             $entityManager->flush();

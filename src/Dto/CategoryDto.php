@@ -38,10 +38,8 @@ final readonly class CategoryDto
         );
     }
 
-    public function toEntity(Category $category): Category
+    public function hydrate(Category $category): void
     {
         $category->setName($this->name);
-
-        return $category;
     }
 }
