@@ -1,0 +1,23 @@
+nelmio_api_doc:
+    type_info: true
+    use_validation_groups: true
+    #cache:
+    #    pool: cache.app
+    #    item_id: nelmio_api_doc.docs
+    models:
+        use_jms: false
+    documentation:
+        info:
+            title: My App
+            description: This is an awesome app!
+            version: 1.0.0
+    areas: # to filter documented areas
+        path_patterns:
+            - ^/api(?!/doc$) # Accepts routes under /api except /api/doc
+        documentation:
+            components:
+                securitySchemes:
+                    Bearer:
+                        type: http
+                        scheme: bearer
+                        bearerFormat: JWT
